@@ -241,23 +241,13 @@ async function logAcceptedUpload(
 }
 
 async function extractPdfText(bytes: Uint8Array) {
-  const { PDFParse } = await import("pdf-parse");
-  let parser: InstanceType<typeof PDFParse> | null = null;
+  const pdfParse = (await import("pdf-parse")).default;
+  const parsed = await pdfParse(Buffer.from(bytes));
+  const text = parsed.text.trim();
 
-  try {
-    PDFParse.setWorker(
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/legacy/build/pdf.worker.mjs",
-    );
-    parser = new PDFParse({ data: bytes });
-    const parsed = await parser.getText();
-    const text = parsed.text.trim();
-
-    if (!text) {
-      throw new Error("No selectable PDF text found.");
-    }
-
-    return text;
-  } finally {
-    await parser?.destroy();
+  if (!text) {
+    throw new Error("No selectable PDF text found.");
   }
+
+  return text;
 }
