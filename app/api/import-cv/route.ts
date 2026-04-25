@@ -81,30 +81,30 @@ async function importCvFile(
     return NextResponse.json({ error: validationError }, { status: 400 });
   }
 
+  const scan = await safeScanFileForMalware(file);
+
+  if (scan.status === "infected") {
+    await logUpload({
+      deviceHash: identity.deviceHash,
+      ipHash: identity.ipHash,
+      fileName: file.name,
+      fileType: file.type,
+      extension,
+      fileSize: file.size,
+      status: "rejected",
+      reason: "malware_detected",
+      scan,
+    });
+
+    return NextResponse.json(
+      { error: "This file was flagged by malware scanning and cannot be imported." },
+      { status: 422 },
+    );
+  }
+
+  const storage = await safeStoreCvInCloudinary(file, bytes);
+
   try {
-    const scan = await safeScanFileForMalware(file);
-
-    if (scan.status === "infected") {
-      await logUpload({
-        deviceHash: identity.deviceHash,
-        ipHash: identity.ipHash,
-        fileName: file.name,
-        fileType: file.type,
-        extension,
-        fileSize: file.size,
-        status: "rejected",
-        reason: "malware_detected",
-        scan,
-      });
-
-      return NextResponse.json(
-        { error: "This file was flagged by malware scanning and cannot be imported." },
-        { status: 422 },
-      );
-    }
-
-    const storage = await safeStoreCvInCloudinary(file, bytes);
-
     if (file.type === "application/pdf" || extension === "pdf") {
       const text = await extractPdfText(bytes);
       await logAcceptedUpload(identity, file, extension, scan, storage);
@@ -128,7 +128,7 @@ async function importCvFile(
       { status: 400 },
     );
   } catch (error) {
-    console.error("CV import failed", {
+    console.error("CV text extraction failed", {
       fileName: file.name,
       fileType: file.type,
       extension,
