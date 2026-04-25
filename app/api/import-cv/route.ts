@@ -1,5 +1,4 @@
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
 import { NextResponse } from "next/server";
 import { storeCvInCloudinary, type StoredCvAsset } from "../../../lib/cloudinary-storage";
 import { scanFileForMalware } from "../../../lib/malware-scan";
@@ -242,7 +241,8 @@ async function logAcceptedUpload(
 }
 
 async function extractPdfText(bytes: Uint8Array) {
-  let parser: PDFParse | null = null;
+  const { PDFParse } = await import("pdf-parse");
+  let parser: InstanceType<typeof PDFParse> | null = null;
 
   try {
     PDFParse.setWorker(
