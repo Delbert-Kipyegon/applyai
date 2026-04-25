@@ -1,6 +1,4 @@
 import mammoth from "mammoth";
-import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { PDFParse } from "pdf-parse";
 import { NextResponse } from "next/server";
 import { storeCvInCloudinary, type StoredCvAsset } from "../../../lib/cloudinary-storage";
@@ -14,19 +12,37 @@ export const maxDuration = 30;
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 const TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "rtf"]);
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const pdfWorkerUrl = pathToFileURL(
-  join(process.cwd(), "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"),
-).href;
 
 export async function POST(request: Request) {
-  const identity = await getRequestIdentity();
-  const formData = await request.formData();
-  const file = formData.get("file");
+  try {
+    const identity = await getRequestIdentity();
+    const formData = await request.formData();
+    const file = formData.get("file");
 
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Upload a CV file to import." }, { status: 400 });
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: "Upload a CV file to import." }, { status: 400 });
+    }
+
+    return await importCvFile(file, identity);
+  } catch (error) {
+    console.error("CV import route failed", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return NextResponse.json(
+      {
+        error:
+          "The CV import service hit a production error. Please try again, or paste your CV text while we check server logs.",
+      },
+      { status: 500 },
+    );
   }
+}
 
+async function importCvFile(
+  file: File,
+  identity: Awaited<ReturnType<typeof getRequestIdentity>>,
+) {
   const extension = file.name.split(".").pop()?.toLowerCase();
 
   if (file.size > MAX_FILE_SIZE) {
@@ -67,7 +83,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const scan = await scanFileForMalware(file);
+    const scan = await safeScanFileForMalware(file);
 
     if (scan.status === "infected") {
       await logUpload({
@@ -88,9 +104,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const storage = await storeCvInCloudinary(file, bytes);
-
-    PDFParse.setWorker(pdfWorkerUrl);
+    const storage = await safeStoreCvInCloudinary(file, bytes);
 
     if (file.type === "application/pdf" || extension === "pdf") {
       const text = await extractPdfText(bytes);
@@ -142,6 +156,38 @@ export async function POST(request: Request) {
       },
       { status: 422 },
     );
+  }
+}
+
+async function safeScanFileForMalware(file: File) {
+  try {
+    return await scanFileForMalware(file);
+  } catch (error) {
+    if (process.env.MALWARE_SCAN_REQUIRED === "true") {
+      throw error;
+    }
+
+    console.error("Malware scan skipped after error", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      provider: "virustotal" as const,
+      status: "skipped" as const,
+      message: error instanceof Error ? error.message : "VirusTotal scan failed.",
+    };
+  }
+}
+
+async function safeStoreCvInCloudinary(file: File, bytes: Uint8Array) {
+  try {
+    return await storeCvInCloudinary(file, bytes);
+  } catch (error) {
+    console.error("Cloudinary CV storage skipped after error", {
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return undefined;
   }
 }
 
@@ -199,6 +245,9 @@ async function extractPdfText(bytes: Uint8Array) {
   let parser: PDFParse | null = null;
 
   try {
+    PDFParse.setWorker(
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.296/legacy/build/pdf.worker.mjs",
+    );
     parser = new PDFParse({ data: bytes });
     const parsed = await parser.getText();
     const text = parsed.text.trim();
