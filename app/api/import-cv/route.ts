@@ -9,6 +9,7 @@ import { getRequestIdentity } from "../../../lib/security";
 import { logUpload } from "../../../lib/uploads";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const MAX_FILE_SIZE = 6 * 1024 * 1024;
 const TEXT_EXTENSIONS = new Set(["txt", "md", "markdown", "rtf"]);

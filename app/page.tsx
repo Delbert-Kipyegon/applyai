@@ -238,13 +238,30 @@ export default function Home() {
       method: "POST",
       body: formData,
     });
-    const payload = (await response.json()) as { text?: string; error?: string };
+    const payload = await readJsonResponse<{ text?: string; error?: string }>(response);
 
     if (!response.ok || !payload.text) {
       throw new Error(payload.error || "We could not import that CV file.");
     }
 
     return payload.text;
+  }
+
+  async function readJsonResponse<T extends { error?: string }>(response: Response): Promise<T> {
+    const contentType = response.headers.get("content-type") || "";
+
+    if (contentType.includes("application/json")) {
+      return (await response.json()) as T;
+    }
+
+    const text = await response.text();
+    const isHtml = text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html");
+
+    return {
+      error: isHtml
+        ? "The upload service returned a server error page instead of JSON. Please try again, or check production function logs for /api/import-cv."
+        : text || "The upload service returned an unexpected response.",
+    } as T;
   }
 
   function handleCvDrop(event: DragEvent<HTMLLabelElement>) {
